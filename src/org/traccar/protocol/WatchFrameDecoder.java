@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 - 2018 Anton Tananaev (anton@traccar.org)
+ * Copyright 2017 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,70 +21,51 @@ import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.handler.codec.frame.FrameDecoder;
 
-import java.nio.charset.StandardCharsets;
 
 public class WatchFrameDecoder extends FrameDecoder {
+
+    public static final int MESSAGE_HEADER = 20;
 
     @Override
     protected Object decode(
             ChannelHandlerContext ctx, Channel channel, ChannelBuffer buf) throws Exception {
 
-        int idIndex = buf.indexOf(buf.readerIndex(), buf.writerIndex(), (byte) '*') + 1;
-        if (idIndex <= 0) {
-            return null;
-        }
-
-        int lengthIndex = buf.indexOf(idIndex, buf.writerIndex(), (byte) '*') + 1;
-        if (lengthIndex <= 0) {
-            return null;
-        }
-
-        int payloadIndex = buf.indexOf(lengthIndex, buf.writerIndex(), (byte) '*');
-        if (payloadIndex < 0) {
-            return null;
-        }
-
-        if (payloadIndex + 5 < buf.writerIndex() && buf.getByte(payloadIndex + 5) == '*'
-                && buf.toString(payloadIndex + 1, 4, StandardCharsets.US_ASCII).matches("\\p{XDigit}+")) {
-            lengthIndex = payloadIndex + 1;
-            payloadIndex = buf.indexOf(lengthIndex, buf.writerIndex(), (byte) '*');
-            if (payloadIndex < 0) {
-                return null;
-            }
-        }
-
-        int length = Integer.parseInt(
-                buf.toString(lengthIndex, payloadIndex - lengthIndex, StandardCharsets.US_ASCII), 16);
-        if (buf.readableBytes() >= payloadIndex + 1 + length + 1) {
-            ChannelBuffer frame = ChannelBuffers.dynamicBuffer();
-            int endIndex = buf.readerIndex() + payloadIndex + 1 + length + 1;
-            while (buf.readerIndex() < endIndex) {
-                byte b = buf.readByte();
-                if (b == 0x7D) {
-                    switch (buf.readByte()) {
-                        case 0x01:
-                            frame.writeByte(0x7D);
-                            break;
-                        case 0x02:
-                            frame.writeByte(0x5B);
-                            break;
-                        case 0x03:
-                            frame.writeByte(0x5D);
-                            break;
-                        case 0x04:
-                            frame.writeByte(0x2C);
-                            break;
-                        case 0x05:
-                            frame.writeByte(0x2A);
-                            break;
-                        default:
-                            throw new IllegalArgumentException();
+        if (buf.readableBytes() >= MESSAGE_HEADER) {
+            ChannelBuffer lengthBuffer = ChannelBuffers.dynamicBuffer();
+            buf.getBytes(buf.readerIndex() + MESSAGE_HEADER - 4 - 1, lengthBuffer, 4);
+            if (buf.readableBytes() >= 10) {
+                ChannelBuffer frame = ChannelBuffers.dynamicBuffer();
+                while (true) {
+                    byte b = buf.readByte();
+                    if (b == 0x7D) {
+                        switch (buf.readByte()) {
+                            case 0x01:
+                                frame.writeByte(0x7D);
+                                break;
+                            case 0x02:
+                                frame.writeByte(0x5B);
+                                break;
+                            case 0x03:
+                                frame.writeByte(0x5D);
+                                break;
+                            case 0x04:
+                                frame.writeByte(0x2C);
+                                break;
+                            case 0x05:
+                                frame.writeByte(0x2A);
+                                break;
+                            default:
+                                throw new IllegalArgumentException();
+                        }
+                    } else {
+                        frame.writeByte(b);
                     }
-                } else {
-                    frame.writeByte(b);
+                    if (b == 0x5D) { // await the terminating ']' character;
+                        break;
+                    }
                 }
+                return frame;
             }
-            return frame;
         }
 
         return null;
